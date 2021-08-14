@@ -250,166 +250,126 @@ bool Init_Imu(bool flag)
 }
 
 
-void Init_Sd_Card(bool flag, bool imu_flag, bool rtd_flag)
+void Init_Sd_Card(bool flag)
 {
   // wait for Serial Monitor to connect. Needed for native USB port boards only:
   if (flag)
   {
-  while (!Serial);
-  Serial.print("Initializing SD card...");
+  while (!Serial)
+  {
+   Serial.print("Waiting for SD card to initialize..."); 
+  }
 
-    if (!SD.begin(BUILTIN_SDCARD)) 
-    {
-      Serial.println("initialization failed. Things to check:");
-      Serial.println("1. is a card inserted?");
-      Serial.println("2. is your wiring correct?");
-      Serial.println("Note: press reset or reopen this serial monitor after fixing your issue!");
-      while (true);
-    }
-    // write header of csv
-    LogToCSV(IMU_HEADER_CSV, IMU_CSV_NAME);
-    LogToCSV(RTD_HEADER_CSV, RTD_CSV_NAME);
+  if (!SD.begin(BUILTIN_SDCARD)) 
+  {
+    Serial.println("initialization failed. Things to check:");
+    Serial.println("1. is a card inserted?");
+    Serial.println("2. is your wiring correct?");
+    Serial.println("Note: press reset or reopen this serial monitor after fixing your issue!");
+    while (true);
+  }
 
-    if(imu_flag) 
-    {
-      //threads.addThread(PollIMU); 
-      //threads.addThread(IMULogger);
-      
-      std::thread t1(PollIMU);
-      std::thread t2(IMULogger);
-      t1.join();
-      t2.join();
-    }
-    /*
-    if(rtd_flag) 
-    {
-      threads.addThread(PollRTD);
-      //threads.addThread(RTDLogger); 
-    }
-    */
+  // write header of csv
+  LogToCSV(IMU_HEADER_CSV, IMU_CSV_NAME);
+  LogToCSV(RTD_HEADER_CSV, RTD_CSV_NAME);
   Serial.println("initialization done."); 
   }
 }
 
 
-void setup() {
+void setup() 
+{
   SERIAL_PORT.begin(115200);
 
   bool rtd_is_initialized = Init_RTD(true);
   bool imu_is_initialized = Init_Imu(true);
   // wait for 1.5 sec
   delay(1500);
-  Init_Sd_Card(true, imu_is_initialized, rtd_is_initialized); 
+  Init_Sd_Card(true); 
+
+
+  if (imu_is_initialized)
+  {
+      std::thread t1(PollIMU);
+      //std::thread t2(IMULogger);
+      t1.detach();
+      //t2.detach();
+  }
+
+
+/*
+  if (rtd_is_initialized)
+  {
+      //threads.addThread(PollRTD);
+      //threads.addThread(RTDLogger); 
+  }
+*/
 }
 
-void loop() {
 
+void loop() {
+  Serial.println("  IMULogger");
+  LogIMU(IMU_CSV_NAME);
+  delay(IMU_SAMPLE_PERIOD);
 }
 
 
 void IMULogger() 
 {
-  //Threads::Mutex mylock;
-  //Threads::Scope m(mylock); // lock on creation
   
-  while(1)
+  while(true)
   {
     Serial.println("  IMULogger");
-    if( myICM.dataReady() )
-    {
-      myICM.getAGMT();                // The values are only updated when you call 'getAGMT'
-      LogIMU(IMU_CSV_NAME);
-      threads.delay(IMU_SAMPLE_PERIOD);
-    }
-    else
-    {
-      Serial.println("Thread: Waiting for data");
-      //threads.delay(500);
-      delay(500);
-    }
-
-    //threads.yield();
+    LogIMU(IMU_CSV_NAME);
+    threads.delay(IMU_SAMPLE_PERIOD);
+    threads.yield();
   }
-} // unlock at destruction
-
-void IMULogger1() 
-{
-  //Threads::Mutex mylock;
-  //Threads::Scope m(mylock); // lock on creation
-  while(1)
-  {
-    Serial.println("IMULogger");
-    if( myICM.dataReady() )
-    {
-      myICM.getAGMT();                // The values are only updated when you call 'getAGMT'
-      LogIMU(IMU_CSV_NAME);
-      delay(IMU_SAMPLE_PERIOD);
-    }
-    else
-    {
-      Serial.println("Thread: Waiting for data");
-      delay(500);
-    }
-  }
-} // unlock at destruction
+} 
 
 
 void RTDLogger() 
 {
-  //Threads::Mutex mylock;
-  //Threads::Scope m(mylock); // lock on creation
-  while(1)
+  while(true)
   {
     Serial.println("RTDLogger");
     LogRTD(RTD_CSV_NAME);
     threads.delay(RTD_SAMPLE_PERIOD);
     threads.yield();
   }
-} // unlock at destruction
-
-void RTDLogger1() 
-{
-  Serial.println("RTDLogger");
-  LogRTD(RTD_CSV_NAME);
-  delay(RTD_SAMPLE_PERIOD);
 } 
+
 
 
 void PollIMU()
 {
-  //Threads::Mutex mylock;
-  //Threads::Scope m(mylock); // lock on creation
 
-  while(1)
+  while(true)
   {
     Serial.println("PollIMU");
     if( myICM.dataReady() )
     {
-      myICM.getAGMT();                // The values are only updated when you call 'getAGMT'
+      myICM.getAGMT();                
       GetAGMTstruct(myICM.agmt);
-      //threads.delay(500);
       threads.delay(IMU_SAMPLE_PERIOD);
-      //threads.setSliceMillis(IMU_SAMPLE_PERIOD);
     }
     else
     {
       Serial.println("Waiting for data");
-      //threads.delay(500);
-      delay(500);
+      threads.delay(500);
+      //delay(500);
     }
-    //threads.yield();
+    threads.yield();
   }
-} // unlock at destruction
+} 
 
 
 void PollRTD()
 {
-  //Threads::Mutex mylock;
-  //Threads::Scope m(mylock); // lock on creation
+
   float t1, t2, t3;
   String date; 
   
-  while(1)
+  while(true)
   {
     Serial.println("PollRTD");
     t1 = GetTemp(&thermo1, 1);
@@ -421,7 +381,7 @@ void PollRTD()
     threads.delay(RTD_SAMPLE_PERIOD);
     threads.yield();
   }
-} // unlock at destruction
+} 
 
 
 float GetTemp(Adafruit_MAX31865 *thermo, int num)
@@ -489,37 +449,6 @@ void LogToCSV(String dataString, const char* csv_name)
 }
 
 
-void LogFormattedFloat1(float val, uint8_t leading, uint8_t decimals, const char* csv_name){
-  float aval = abs(val);
-  if(val < 0){
-    LogToCSV("-", csv_name);
-  }else{
-    LogToCSV(" ", csv_name);
-  }
-  for( uint8_t indi = 0; indi < leading; indi++ ){
-    uint32_t tenpow = 0;
-    if( indi < (leading-1) ){
-      tenpow = 1;
-    }
-    for(uint8_t c = 0; c < (leading-1-indi); c++){
-      tenpow *= 10;
-    }
-    if( aval < tenpow){
-      LogToCSV("0", csv_name);
-    }else{
-      break;
-    }
-  }
-  if(val < 0){
-    //SERIAL_PORT.print(-val, decimals);
-    LogToCSV(String(-val, decimals), csv_name);
-  }else{
-    //SERIAL_PORT.print(val, decimals);
-    LogToCSV(String(val, decimals), csv_name);
-  }
-}
-
-
 String LogFormattedFloat(float val, uint8_t leading, uint8_t decimals){
   float aval = abs(val);
   String s = "";
@@ -567,7 +496,6 @@ String TimeStr()
     mill = String(num);
   
   String datetime = String(year()) + "-" + String(month()) + "-" + String(day()) + " " + String(hour()) + ":" + String(minute()) + ":" + String(second()) + "." + mill;
-  // Serial.println(datetime);
   return datetime;
 }
 
@@ -575,16 +503,15 @@ String TimeStr()
 // "DateTime,Scaled_Acc_X_(mg),Scaled_Acc_Y_(mg),Scaled_Acc_Z_(mg),Gyr_X_(DPS),Gyr_Y_(DPS),Gyr_Z_(DPS),Mag_X_(uT),Mag_Y_(uT),Mag_Z_(uT),Tmp_(C)\n"
 void GetAGMTstruct(ICM_20948_AGMT_t agmt)
 {
-  //Threads::Mutex mylock;
-  //Threads::Scope m(mylock); // lock on creation
   String date = TimeStr();
   struct imu sensor = {date,myICM.accX(),myICM.accY(),myICM.accZ(),myICM.gyrX(),myICM.gyrY(),myICM.gyrZ(),myICM.magX(),myICM.magY(),myICM.magZ(),myICM.temp()};
   enqueue_imu(sensor);
-} // unlock on destruction
+} 
 
 
 void LogRTD(const char *csv_name)
 {
+    // std::lock_guard<std::mutex> lock(m_file); // lock on creation
     struct rtd temps = dequeue_rtd();
     if(temps.error == false)
     {
@@ -610,14 +537,12 @@ void LogRTD(const char *csv_name)
       else 
         Serial.println("error opening IMU_CSV_NAME");
     }
-}
+} // unlock on destruction
 
 
 void LogIMU(const char *csv_name)
 {
-  //File dataFile = SD.open(csv_name, FILE_WRITE);
-  //Serial.println("LogIMU");
-  std::lock_guard<std::mutex> lock(m_file); // lock on creation
+  //std::lock_guard<std::mutex> lock(m_file); // lock on creation
   while(!is_imu_queue_empty())
   {
     //Serial.println("LogIMU while loop");
@@ -665,5 +590,4 @@ void LogIMU(const char *csv_name)
         Serial.println("error opening IMU_CSV_NAME");
     }
   }
-  //dataFile.close();
 } // unlock at destruction
