@@ -10,7 +10,7 @@ os.chdir(CUR_FOLDER)
 
 rm_set = set()
 SENSOR_DATA = "IMU.csv"
-DATA_SVG = "IMU.svg"
+DATA_SVG = "head100_IMU.svg"
 DATA_PNG = "IMU.png"
 
 
@@ -18,6 +18,7 @@ df = pd.read_csv(SENSOR_DATA, index_col=0, parse_dates=True)
 print(df.head())
 # remove rows with header, drop blanks, convert data to float
 df = df[df['Scaled_Acc_X_(mg)'] != 'Scaled_Acc_X_(mg)']
+df = df.head(100)
 df = df.dropna()
 df = df.astype(float)
 
