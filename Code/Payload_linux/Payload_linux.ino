@@ -55,7 +55,7 @@ Adafruit_MAX31865 thermo1 = Adafruit_MAX31865(CS_PIN1);
 Adafruit_MAX31865 thermo2 = Adafruit_MAX31865(CS_PIN2);
 Adafruit_MAX31865 thermo3 = Adafruit_MAX31865(CS_PIN3);
 
-#define RTD_SAMPLE_PERIOD 5000
+#define RTD_SAMPLE_PERIOD 1000
 #define IMU_SAMPLE_PERIOD 30
 #define MAX_RTD 30
 #define MAX_IMU 30
@@ -64,6 +64,10 @@ volatile int FRONT_RTD = 0;
 volatile int REAR_RTD = -1;
 volatile int FRONT_IMU = 0;
 volatile int REAR_IMU = -1;
+
+// wrap around after 50 days
+uint32_t RTD_TIME = 0; 
+uint32_t IMU_TIME = 0; 
 
 std::mutex m_rtd;
 std::mutex m_imu;
@@ -225,7 +229,8 @@ bool Init_Imu(bool flag)
     #endif
       
       bool initialized = false;
-      while( !initialized ){
+      while( !initialized )
+      {
     
     #ifdef USE_SPI
         myICM.begin( CS_PIN, SPI_PORT ); 
@@ -287,33 +292,42 @@ void setup()
   delay(1500);
   Init_Sd_Card(true); 
 
-
+  // create thread to poll IMU
   if (imu_is_initialized)
   {
-      std::thread t1(PollIMU);
-      //std::thread t2(IMULogger);
-      t1.detach();
-      //t2.detach();
+      std::thread t_imu(PollIMU);
+      t_imu.detach();
   }
 
-
-/*
+  // create thread to poll RTD 
   if (rtd_is_initialized)
   {
-      //threads.addThread(PollRTD);
-      //threads.addThread(RTDLogger); 
+      std::thread t_rtd(PollRTD);
+      t_rtd.detach();
   }
-*/
+
 }
 
 
 void loop() {
-  Serial.println("  IMULogger");
-  LogIMU(IMU_CSV_NAME);
-  delay(IMU_SAMPLE_PERIOD);
+  // log every IMU_SAMPLE_PERIOD ms
+  if (millis() >= IMU_TIME + IMU_SAMPLE_PERIOD)
+  {
+    Serial.println("  IMULogger");
+    LogIMU(IMU_CSV_NAME);
+    IMU_TIME += IMU_SAMPLE_PERIOD;
+  }
+
+  // log every RTD_SAMPLE_PERIOD ms
+  if (millis() >= RTD_TIME + RTD_SAMPLE_PERIOD)
+  {
+    Serial.println("      RTDLogger");
+    LogRTD(RTD_CSV_NAME);
+    RTD_TIME += RTD_SAMPLE_PERIOD;
+  }
 }
 
-
+/*
 void IMULogger() 
 {
   
@@ -337,8 +351,7 @@ void RTDLogger()
     threads.yield();
   }
 } 
-
-
+*/
 
 void PollIMU()
 {
@@ -444,7 +457,7 @@ void LogToCSV(String dataString, const char* csv_name)
   }
   // if the file isn't open, pop up an error:
   else {
-    Serial.println("error opening IMU_CSV_NAME");
+    Serial.println("error opening file");
   }
 }
 
@@ -531,11 +544,11 @@ void LogRTD(const char *csv_name)
         dataFile.print("\n");
         dataFile.close();
   
-        Serial.println("Logging RTD !!!");  
+        Serial.println("                  Logging RTD !!!");  
       }
       // if the file isn't open, pop up an error:
       else 
-        Serial.println("error opening IMU_CSV_NAME");
+        Serial.println("error opening RTD_CSV_NAME");
     }
 } // unlock on destruction
 
