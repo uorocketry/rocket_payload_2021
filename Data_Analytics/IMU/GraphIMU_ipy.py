@@ -10,7 +10,7 @@ os.chdir(CUR_FOLDER)
 
 rm_set = set()
 SENSOR_DATA = "IMU.csv"
-DATA_SVG = "head100_IMU.svg"
+DATA_SVG = "IMU.svg"
 DATA_PNG = "IMU.png"
 
 
@@ -26,8 +26,8 @@ ax = df.plot(title="IMU Data", grid=True, marker='.', markersize=10)
 ax.set_xlabel("DateTime")
 fig = ax.get_figure()
 fig.set_size_inches(12, 9)
-fig.savefig(DATA_SVG, dpi = 100)
-# fig.savefig(DATA_PNG, dpi = 100)
+#fig.savefig(DATA_SVG, dpi = 100)
+fig.savefig(DATA_PNG, dpi = 100)
 
 # %%
 import os  
