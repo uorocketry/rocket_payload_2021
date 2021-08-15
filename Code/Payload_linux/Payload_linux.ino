@@ -1,14 +1,8 @@
 /****************************************************************
- * Example1_Basics.ino
- * ICM 20948 Arduino Library Demo 
- * Use the default configuration to stream 9-axis IMU data
- * Owen Lyke @ SparkFun Electronics
- * Original Creation Date: April 17 2019
+ * Sensor Libraries used:
+ *    ICM 20948 Arduino Library by Owen Lyke @ SparkFun Electronics
+ *    Adafruit PT100/P1000 RTD Sensor w/MAX31865 library by Limor Fried/Ladyada @ Adafruit Industries
  * 
- * This code is beerware; if you see me (or any other SparkFun employee) at the
- * local, and you've found our code helpful, please buy us a round!
- * 
- * Distributed as-is; no warranty is given.
  ***************************************************************/
 #include "TeensyThreads.h"
 #include "ICM_20948.h"  // Click here to get the library: http://librarymanager/All#SparkFun_ICM_20948_IMU
@@ -16,37 +10,15 @@
 #include <SD.h>
 #include <TimeLib.h>
 
-//const int chipSelect = 10;
-#define IMU_CSV_NAME    "IMU.csv"
-#define IMU_HEADER_CSV  "DateTime,Scaled_Acc_X_(mg),Scaled_Acc_Y_(mg),Scaled_Acc_Z_(mg),Gyr_X_(DPS),Gyr_Y_(DPS),Gyr_Z_(DPS),Mag_X_(uT),Mag_Y_(uT),Mag_Z_(uT),Tmp_(C)\n"
-#define RTD_CSV_NAME    "RTD.csv"
-#define RTD_HEADER_CSV  "DateTime,RTD1_(C),RTD2_(C),RTD3_(C)\n"
 
-//#define USE_SPI       // Uncomment this to use SPI
+// SparkFun 9DoF ICM_20948 IMU     
+#define AD0_VAL   1     // The value of the last bit of the I2C address. On the SparkFun 9DoF IMU breakout the default is 1, and when 
+ICM_20948_I2C myICM;    // create an ICM_20948_I2C object
 
 
-#define SERIAL_PORT Serial
-
-#define SPI_PORT SPI    // Your desired SPI port.       Used only when "USE_SPI" is defined
-#define CS_PIN 2        // Which pin you connect CS to. Used only when "USE_SPI" is defined
-
-#define WIRE_PORT Wire  // Your desired Wire port.      Used when "USE_SPI" is not defined
-#define AD0_VAL   1     // The value of the last bit of the I2C address. 
-                        // On the SparkFun 9DoF IMU breakout the default is 1, and when 
-                        // the ADR jumper is closed the value becomes 0
-
-#ifdef USE_SPI
-  ICM_20948_SPI myICM;  // If using SPI create an ICM_20948_SPI object
-#else
-  ICM_20948_I2C myICM;  // Otherwise create an ICM_20948_I2C object
-#endif
-
-// The value of the Rref resistor. Use 430.0 for PT100 and 4300.0 for PT1000
-#define RREF      430.0
-// The 'nominal' 0-degrees-C resistance of the sensor
-// 100.0 for PT100, 1000.0 for PT1000
-
-#define RNOMINAL  100.0
+// Adafruit_MAX31865 RTD 
+#define RREF      430.0 // The value of the Rref resistor. Use 430.0 for PT100 and 4300.0 for PT1000
+#define RNOMINAL  100.0 // 'nominal' 0-degrees-C resistance of the sensor 100.0 for PT100, 1000.0 for PT1000
 #define CS_PIN1 10
 #define CS_PIN2 37
 #define CS_PIN3 36
@@ -55,8 +27,23 @@ Adafruit_MAX31865 thermo1 = Adafruit_MAX31865(CS_PIN1);
 Adafruit_MAX31865 thermo2 = Adafruit_MAX31865(CS_PIN2);
 Adafruit_MAX31865 thermo3 = Adafruit_MAX31865(CS_PIN3);
 
+
+// Log Data 
+#define IMU_CSV_NAME    "IMU.csv"
+#define IMU_HEADER_CSV  "DateTime,Scaled_Acc_X_(mg),Scaled_Acc_Y_(mg),Scaled_Acc_Z_(mg),Gyr_X_(DPS),Gyr_Y_(DPS),Gyr_Z_(DPS),Mag_X_(uT),Mag_Y_(uT),Mag_Z_(uT),Tmp_(C)\n"
+#define RTD_CSV_NAME    "RTD.csv"
+#define RTD_HEADER_CSV  "DateTime,RTD1_(C),RTD2_(C),RTD3_(C)\n"
+
+
+// Period for polling sensor data 
 #define RTD_SAMPLE_PERIOD 1000
 #define IMU_SAMPLE_PERIOD 30
+// wrap around after 50 days
+uint32_t RTD_TIME = 0; 
+uint32_t IMU_TIME = 0; 
+
+
+// Queue Size, vars for RTD and IMU data 
 #define MAX_RTD 30
 #define MAX_IMU 30
 
@@ -65,13 +52,9 @@ volatile int REAR_RTD = -1;
 volatile int FRONT_IMU = 0;
 volatile int REAR_IMU = -1;
 
-// wrap around after 50 days
-uint32_t RTD_TIME = 0; 
-uint32_t IMU_TIME = 0; 
-
+// mutex for RTD and IMU Queues
 std::mutex m_rtd;
 std::mutex m_imu;
-std::mutex m_file;
 
 struct rtd
 {
@@ -82,7 +65,9 @@ struct rtd
   bool error;
 };
 
-struct rtd ARR_RTD[MAX_RTD];
+// RTD Queue
+struct rtd QUEUE_RTD[MAX_RTD];
+
 
 // FIFO First In First Out 
 void enqueue_rtd(struct rtd temps)
@@ -97,7 +82,7 @@ void enqueue_rtd(struct rtd temps)
   }
 
   // increment rear then assign value to index
-  ARR_RTD[++REAR_RTD] = temps; 
+  QUEUE_RTD[++REAR_RTD] = temps; 
 } // unlock at destruction
 
 
@@ -112,7 +97,7 @@ struct rtd dequeue_rtd()
       return temps;
   }
 
-  temps = ARR_RTD[FRONT_RTD];
+  temps = QUEUE_RTD[FRONT_RTD];
   FRONT_RTD++;
   return temps;
 } // unlock at destruction
@@ -150,7 +135,9 @@ struct imu
   bool error;
 };
 
-struct imu ARR_IMU[MAX_IMU];
+// IMU Queue
+struct imu QUEUE_IMU[MAX_IMU];
+
 
 // FIFO First In First Out 
 void enqueue_imu(struct imu sensor)
@@ -165,7 +152,7 @@ void enqueue_imu(struct imu sensor)
   }
 
   // increment rear then assign value to index
-  ARR_IMU[++REAR_IMU] = sensor; 
+  QUEUE_IMU[++REAR_IMU] = sensor; 
 } // unlock at destruction
 
 
@@ -180,7 +167,7 @@ struct imu dequeue_imu()
       return sensor;
   }
   
-  sensor = ARR_IMU[FRONT_IMU];
+  sensor = QUEUE_IMU[FRONT_IMU];
   FRONT_IMU++;
   return sensor;
 } // unlock at destruction
@@ -214,39 +201,38 @@ bool Init_RTD(bool flag)
   return false;
 } // unlock at destruction
 
+
 bool Init_Imu(bool flag)
 {
   if (flag)
   {
-    SERIAL_PORT.begin(115200);
-    while(!SERIAL_PORT){};
+    Serial.begin(115200);
+    // wait for Serial 
+    while(!Serial)
+    {
+      Serial.println("Waiting for Serial to initialize..."); 
+    }
+    
+    Wire.begin();
+    Wire.setClock(400000);
+
+    bool initialized = false;
+    while( !initialized )
+    {
+      myICM.begin( Wire, AD0_VAL );
   
-    #ifdef USE_SPI
-        SPI_PORT.begin();
-    #else
-        WIRE_PORT.begin();
-        WIRE_PORT.setClock(400000);
-    #endif
-      
-      bool initialized = false;
-      while( !initialized )
+      Serial.print( F("Initialization of the sensor returned: ") );
+      Serial.println( myICM.statusString() );
+      if( myICM.status != ICM_20948_Stat_Ok )
       {
-    
-    #ifdef USE_SPI
-        myICM.begin( CS_PIN, SPI_PORT ); 
-    #else
-        myICM.begin( WIRE_PORT, AD0_VAL );
-    #endif
-    
-        SERIAL_PORT.print( F("Initialization of the sensor returned: ") );
-        SERIAL_PORT.println( myICM.statusString() );
-        if( myICM.status != ICM_20948_Stat_Ok ){
-          SERIAL_PORT.println( "Trying again..." );
-          delay(500);
-        }else{
-          initialized = true;
-        }
+        Serial.println( "Trying again..." );
+        delay(500);
       }
+      else
+      {
+        initialized = true;
+      }
+    }
 
   return initialized;
   }
@@ -260,31 +246,31 @@ void Init_Sd_Card(bool flag)
   // wait for Serial Monitor to connect. Needed for native USB port boards only:
   if (flag)
   {
-  while (!Serial)
-  {
-   Serial.print("Waiting for SD card to initialize..."); 
-  }
-
-  if (!SD.begin(BUILTIN_SDCARD)) 
-  {
-    Serial.println("initialization failed. Things to check:");
-    Serial.println("1. is a card inserted?");
-    Serial.println("2. is your wiring correct?");
-    Serial.println("Note: press reset or reopen this serial monitor after fixing your issue!");
-    while (true);
-  }
-
-  // write header of csv
-  LogToCSV(IMU_HEADER_CSV, IMU_CSV_NAME);
-  LogToCSV(RTD_HEADER_CSV, RTD_CSV_NAME);
-  Serial.println("initialization done."); 
+    while (!Serial)
+    {
+      Serial.println("Waiting for SD card to initialize..."); 
+    }
+  
+    if (!SD.begin(BUILTIN_SDCARD)) 
+    {
+      Serial.println("initialization failed. Things to check:");
+      Serial.println("1. is a card inserted?");
+      Serial.println("2. is your wiring correct?");
+      Serial.println("Note: press reset or reopen this serial monitor after fixing your issue!");
+      while (true);
+    }
+  
+    // write header of csv
+    LogToCSV(IMU_HEADER_CSV, IMU_CSV_NAME);
+    LogToCSV(RTD_HEADER_CSV, RTD_CSV_NAME);
+    Serial.println("initialization done."); 
   }
 }
 
 
 void setup() 
 {
-  SERIAL_PORT.begin(115200);
+  Serial.begin(115200);
 
   bool rtd_is_initialized = Init_RTD(true);
   bool imu_is_initialized = Init_Imu(true);
@@ -309,8 +295,9 @@ void setup()
 }
 
 
-void loop() {
-  // log every IMU_SAMPLE_PERIOD ms
+void loop() 
+{
+  // log every "IMU_SAMPLE_PERIOD" ms
   if (millis() >= IMU_TIME + IMU_SAMPLE_PERIOD)
   {
     Serial.println("  IMULogger");
@@ -318,7 +305,7 @@ void loop() {
     IMU_TIME += IMU_SAMPLE_PERIOD;
   }
 
-  // log every RTD_SAMPLE_PERIOD ms
+  // log every "RTD_SAMPLE_PERIOD" ms
   if (millis() >= RTD_TIME + RTD_SAMPLE_PERIOD)
   {
     Serial.println("      RTDLogger");
@@ -327,31 +314,6 @@ void loop() {
   }
 }
 
-/*
-void IMULogger() 
-{
-  
-  while(true)
-  {
-    Serial.println("  IMULogger");
-    LogIMU(IMU_CSV_NAME);
-    threads.delay(IMU_SAMPLE_PERIOD);
-    threads.yield();
-  }
-} 
-
-
-void RTDLogger() 
-{
-  while(true)
-  {
-    Serial.println("RTDLogger");
-    LogRTD(RTD_CSV_NAME);
-    threads.delay(RTD_SAMPLE_PERIOD);
-    threads.yield();
-  }
-} 
-*/
 
 void PollIMU()
 {
@@ -485,10 +447,10 @@ String LogFormattedFloat(float val, uint8_t leading, uint8_t decimals){
     }
   }
   if(val < 0){
-    //SERIAL_PORT.print(-val, decimals);
+    //Serial.print(-val, decimals);
     s = s + String(-val, decimals);
   }else{
-    //SERIAL_PORT.print(val, decimals);
+    //Serial.print(val, decimals);
     s = s + String(val, decimals);
   }
   return s;
@@ -524,7 +486,6 @@ void GetAGMTstruct(ICM_20948_AGMT_t agmt)
 
 void LogRTD(const char *csv_name)
 {
-    // std::lock_guard<std::mutex> lock(m_file); // lock on creation
     struct rtd temps = dequeue_rtd();
     if(temps.error == false)
     {
@@ -550,12 +511,11 @@ void LogRTD(const char *csv_name)
       else 
         Serial.println("error opening RTD_CSV_NAME");
     }
-} // unlock on destruction
+} 
 
 
 void LogIMU(const char *csv_name)
 {
-  //std::lock_guard<std::mutex> lock(m_file); // lock on creation
   while(!is_imu_queue_empty())
   {
     //Serial.println("LogIMU while loop");
@@ -603,4 +563,4 @@ void LogIMU(const char *csv_name)
         Serial.println("error opening IMU_CSV_NAME");
     }
   }
-} // unlock at destruction
+} 
