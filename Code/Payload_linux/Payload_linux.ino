@@ -347,9 +347,9 @@ void PollRTD()
   while(true)
   {
     Serial.println("PollRTD");
-    t1 = GetTemp(&thermo1, 1);
-    t2 = GetTemp(&thermo2, 2);
-    t3 = GetTemp(&thermo3, 3);
+    t1 = GetTemp(&thermo1);
+    t2 = GetTemp(&thermo2);
+    t3 = GetTemp(&thermo3);
     date = TimeStr();
     struct rtd temps = {date,t1,t2,t3,false};
     enqueue_rtd(temps);
@@ -359,7 +359,7 @@ void PollRTD()
 } 
 
 
-float GetTemp(Adafruit_MAX31865 *thermo, int num)
+float GetTemp(Adafruit_MAX31865 *thermo)
 {
   uint16_t rtd = thermo->readRTD();
   float temperature = thermo->temperature(RNOMINAL, RREF);
@@ -372,7 +372,7 @@ float GetTemp(Adafruit_MAX31865 *thermo, int num)
   Serial.print("Ratio = "); Serial.println(ratio,8);
   Serial.print("Resistance = "); Serial.println(RREF*ratio,8);
   Serial.print("Temperature = "); Serial.println(thermo->temperature(RNOMINAL, RREF));
-  Serial.print("RTD: "); Serial.println(num); 
+  Serial.print("RTD: "); 
   */
 
   // Check and print any faults
